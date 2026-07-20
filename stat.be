@@ -30,12 +30,8 @@ else
     print("Size: " + str(info.size) + " bytes")
 end
 
-# Дата (преобразуем Unix timestamp в строку)
-var t = info.mtime
-var date = ""  # упрощённо: можно вывести как число, либо использовать внешний API
-# Здесь можно было бы использовать os.date(), но в Berry её нет.
-# Поэтому покажем только timestamp
-print("Modified: " + str(t))
+# Дата (Unix timestamp)
+print("Modified: " + str(info.mtime))
 
 # Если это картинка — покажем разрешение
 if info.width != nil and info.height != nil then
