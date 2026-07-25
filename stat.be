@@ -1,78 +1,120 @@
-# stat.be — Скрипт получения подробной информации о файле
-import string
+# stat.be - подробная информация о файле или каталоге.
+#
+# Примеры:
+#   stat photo.jpg
+#   stat /etc/wifi.conf
+#   stat /lib
+#
+# Показывает: имя, тип, размер (с человекочитаемыми единицами), дату
+# изменения, а для картинок - разрешение и мегапиксели.
 
-def format_size(bytes)
+# Человекочитаемый размер: 1536 -> "1.5 KB"
+def human(bytes)
   if bytes < 1024
-    return string.format("%d B", bytes)
-  elif bytes < 1024 * 1024
-    return string.format("%.2f KB", bytes / 1024.0)
-  else
-    return string.format("%.2f MB", bytes / (1024.0 * 1024.0))
+    return str(bytes) + " B"
   end
+  if bytes < 1024 * 1024
+    var kb = bytes / 1024
+    var frac = (bytes % 1024) * 10 / 1024
+    return str(kb) + "." + str(frac) + " KB"
+  end
+  var mb = bytes / (1024 * 1024)
+  var mfrac = (bytes % (1024 * 1024)) * 10 / (1024 * 1024)
+  return str(mb) + "." + str(mfrac) + " MB"
 end
 
-def format_time(ts)
-  if ts == 0
-    return "Неизвестно"
-  end
-  # Базовая конвертация POSIX timestamp в системное время UTC
-  var sec = ts % 60
-  var min = (ts / 60) % 60
-  var hour = (ts / 3600) % 24
-  var days = ts / 86400
-
-  # Приблизительный расчет даты (начиная с 1 января 1970)
-  var z = days + 719468
-  var era = z / 146097
-  var doe = z - era * 146097
-  var yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
-  var y = yoe + era * 400
-  var doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
-  var mp = (5 * doy + 2) / 153
-  var d = doy - (153 * mp + 2) / 5 + 1
-  var m = mp + (mp < 10 ? 3 : -9)
-  y = y + (m <= 2 ? 1 : 0)
-
-  return string.format("%04d-%02d-%02d %02d:%02d:%02d UTC", y, m, d, hour, min, sec)
+# Строка "ключ: значение" с выравниванием ключа
+def row(key, value, color)
+  screen.print(key, screen.YELLOW)
+  screen.print(value, color)
+  screen.print("\n")
 end
 
 def main()
-  # В CLI аргументы передаются через глобальную переменную arg
-  var filepath = nil
-  if global("arg") != nil && arg != ""
-    filepath = arg
-  else
-    screen.print("Использование: run stat.be <путь_к_файлу>\n", screen.YELLOW)
+  if arg == nil || arg == ""
+    screen.print("Usage: stat <file>\n", screen.RED)
     return
   end
 
-  # Вызываем native API fs.stat
-  var info = fs.stat(filepath)
+  # Относительный путь разрешаем от текущего каталога
+  var path = arg
+  if path[0] != "/"
+    var base = os.cwd()
+    if base == "/"
+      path = "/" + arg
+    else
+      path = base + "/" + arg
+    end
+  end
 
+  var info = fs.stat(path)
   if info == nil
-    screen.print(string.format("Ошибка: файл '%s' не найден!\n", filepath), screen.RED)
+    screen.print("stat: no such file\n", screen.RED)
+    screen.print(path, screen.RED)
+    screen.print("\n")
     return
   end
 
-  screen.print("--- Информация о файле ---\n", screen.CYAN)
-  screen.print(string.format(" Имя:        %s\n", info["name"]))
-  
+  screen.print("--- ", screen.CYAN)
+  screen.print(info["name"], screen.WHITE)
+  screen.print(" ---\n", screen.CYAN)
+
   if info["isDir"]
-    screen.print(" Тип:        Директория\n", screen.GREEN)
+    row("Type:  ", "Directory", screen.MAGENTA)
+    # Для каталога считаем содержимое
+    var items = fs.list(path)
+    if items != nil
+      var files = 0
+      var dirs  = 0
+      var total = 0
+      for it : items
+        if it["isDir"]
+          dirs = dirs + 1
+        else
+          files = files + 1
+          total = total + it["size"]
+        end
+      end
+      row("Files: ", str(files), screen.GREEN)
+      row("Dirs:  ", str(dirs), screen.GREEN)
+      row("Total: ", human(total), screen.GREEN)
+    end
   else
-    screen.print(" Тип:        Обычный файл\n")
-    screen.print(string.format(" Размер:     %d байт (%s)\n", info["size"], format_size(info["size"])))
+    row("Type:  ", info["format"], screen.MAGENTA)
+    row("Size:  ", human(info["size"]), screen.GREEN)
+
+    # Разрешение есть только у распознанных картинок
+    if info.find("width") != nil
+      var w = info["width"]
+      var h = info["height"]
+      row("Res:   ", str(w) + "x" + str(h), screen.CYAN)
+
+      # Мегапиксели с одним знаком после запятой
+      var px = w * h
+      var mp = px / 100000
+      row("Pixels:", str(mp / 10) + "." + str(mp % 10) + " MP", screen.CYAN)
+
+      # Влезет ли на наш экран 160x128 без масштабирования
+      if w <= 160 && h <= 128
+        row("Fits:  ", "yes (1:1)", screen.GREEN)
+      else
+        # Во сколько раз надо ужать
+        var sw = (w + 159) / 160
+        var sh = (h + 127) / 128
+        var s = sw
+        if sh > s
+          s = sh
+        end
+        row("Scale: ", "1/" + str(s), screen.YELLOW)
+      end
+    end
   end
 
-  screen.print(string.format(" Изменен:    %s\n", format_time(info["mtime"])))
+  row("Path:  ", info["path"], screen.WHITE)
 
-  # Проверяем, удалось ли C++ модулю определить параметры изображения (JPEG/PNG)
-  if info.contains("width") && info.contains("height")
-    screen.print(" --- Изображение ---\n", screen.MAGENTA)
-    screen.print(string.format(" Разрешение: %dx%d пикселей\n", info["width"], info["height"]))
-  end
-  
-  screen.print("--------------------------\n", screen.CYAN)
+  # Дата: os.date вернёт "unknown" пока NTP не отработал
+  var d = os.date(info["mtime"])
+  row("Date:  ", d, screen.WHITE)
 end
 
 main()
