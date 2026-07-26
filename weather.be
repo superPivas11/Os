@@ -38,7 +38,7 @@ end
 # Направление ветра в румбах
 def wind_dir(deg)
   var names = ["S", "SV", "V", "UV", "U", "UZ", "Z", "SZ"]
-  var idx = ((deg + 22) / 45) % 8
+  var idx = ((int(deg) + 22) / 45) % 8
   return names[idx]
 end
 
@@ -66,7 +66,8 @@ def locate(city)
 
   screen.print("Locating...\n", screen.CYAN)
   var raw = http.get(
-    "https://geocoding-api.open-meteo.com/v1/search?name=" + city + "&count=1")
+    "https://geocoding-api.open-meteo.com/v1/search?name=" +
+    http.encode(city) + "&count=1")
   if raw == nil
     return nil
   end
