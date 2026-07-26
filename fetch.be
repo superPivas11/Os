@@ -1,33 +1,18 @@
-# fetch.be - красивая загрузка пакетов с твоего гита.
+# fetch.be - массовая установка пакетов, в стиле pacman.
 #
 # Примеры:
-#   fetch stat            скачать один пакет
-#   fetch stat time       скачать несколько за раз
-#   fetch --list          что уже установлено
+#   fetch stat              один пакет
+#   fetch stat time mania   несколько за раз
+#   fetch --list            что уже установлено
 #
-# Отличие от встроенного "pkg install": показывает сводку в стиле pacman,
-# умеет ставить несколько пакетов одной командой и считает статистику.
+# Отличие от встроенного "pkg install": ставит несколько пакетов одной
+# командой и печатает сводку.
+#
+# Раньше эта либа сама собирала URL и качала только "<имя>.be" - поэтому
+# архивы с играми через неё не ставились, а при сбое сети не было повтора.
+# Теперь она зовёт pkg.install, который умеет и .tar, и повторы.
 
-# Разбить строку аргументов по пробелам в список слов
-def split_args(s)
-  var out = []
-  var cur = ""
-  for i : 0 .. size(s) - 1
-    var c = s[i]
-    if c == " "
-      if size(cur) > 0
-        out.push(cur)
-        cur = ""
-      end
-    else
-      cur = cur + c
-    end
-  end
-  if size(cur) > 0
-    out.push(cur)
-  end
-  return out
-end
+import string
 
 def print_installed()
   var items = fs.list("/lib")
@@ -35,18 +20,27 @@ def print_installed()
     screen.print("No packages installed\n", screen.YELLOW)
     return
   end
+
   screen.print(":: ", screen.BLUE)
-  screen.print("Installed packages\n", screen.WHITE)
+  screen.print("Installed\n", screen.WHITE)
+
   var total = 0
+  var count = 0
   for it : items
     screen.print(" ", screen.WHITE)
-    screen.print(it["name"], screen.GREEN)
-    screen.print(" ", screen.WHITE)
-    screen.print(str(it["size"]) + "B\n", screen.CYAN)
-    total = total + it["size"]
+    if it["isDir"]
+      # Каталог - это многофайловый пакет
+      screen.print(it["name"] + "/\n", screen.MAGENTA)
+    else
+      screen.print(it["name"], screen.GREEN)
+      screen.print(" " + str(it["size"]) + "B\n", screen.CYAN)
+      total = total + it["size"]
+    end
+    count = count + 1
   end
+
   screen.print("Total: ", screen.YELLOW)
-  screen.print(str(size(items)) + " pkgs, " + str(total) + " B\n", screen.WHITE)
+  screen.print(str(count) + " items, " + str(total) + " B\n", screen.WHITE)
 end
 
 def main()
@@ -62,25 +56,36 @@ def main()
   end
 
   if !wifi.connected()
-    screen.print("Not connected to Wi-Fi\n", screen.RED)
+    screen.print("No Wi-Fi\n", screen.RED)
     return
   end
 
-  var reg = pkg.registry()
-  if reg == nil
-    screen.print("Registry not set. Use:\n", screen.RED)
+  if pkg.registry() == nil
+    screen.print("Registry not set:\n", screen.RED)
     screen.print("pkg registry <url>\n", screen.YELLOW)
     return
   end
 
-  var names = split_args(arg)
-  var okCount = 0
+  var names = string.split(arg, " ")
+
+  # string.split на "a  b" даёт пустые элементы - выкидываем их
+  var clean = []
+  for n : names
+    if size(n) > 0
+      clean.push(n)
+    end
+  end
+  names = clean
+
+  if size(names) == 0
+    screen.print("Nothing to do\n", screen.YELLOW)
+    return
+  end
+
+  var ok     = 0
   var failed = []
+  var idx    = 0
 
-  screen.print(":: ", screen.BLUE)
-  screen.print("Fetching " + str(size(names)) + " pkg(s)\n", screen.WHITE)
-
-  var idx = 0
   for name : names
     idx = idx + 1
 
@@ -88,22 +93,20 @@ def main()
     screen.print("(" + str(idx) + "/" + str(size(names)) + ") ", screen.MAGENTA)
     screen.print(name + "\n", screen.CYAN)
 
-    var url = reg + "/" + name + ".be"
-    var dst = "/lib/" + name + ".be"
-
-    if http.download(url, dst)
-      okCount = okCount + 1
+    # pkg.install сам разберётся: архив это или одиночный скрипт,
+    # и сам повторит попытку при сбое сети.
+    if pkg.install(name)
+      ok = ok + 1
     else
       failed.push(name)
     end
   end
 
-  # Итоговая сводка
   screen.print(":: ", screen.BLUE)
   if size(failed) == 0
-    screen.print("All " + str(okCount) + " installed\n", screen.GREEN)
+    screen.print("All " + str(ok) + " installed\n", screen.GREEN)
   else
-    screen.print(str(okCount) + " ok, " + str(size(failed)) + " failed\n", screen.YELLOW)
+    screen.print(str(ok) + " ok, " + str(size(failed)) + " failed\n", screen.YELLOW)
     for f : failed
       screen.print("  ! " + f + "\n", screen.RED)
     end
